@@ -1,0 +1,52 @@
+# ---- Segreti ----
+.env*
+!.env.example
+*.pem
+
+# ---- Chiave privata di firma delle licenze: MAI nel repository ----
+tools/*.key
+tools/keys/*
+!tools/keys/.gitkeep
+*-private.key
+giokiradd-private.key
+
+# ---- Database ----
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ---- File dei prodotti (NON devono finire nel repo) ----
+files/*
+!files/.gitkeep
+
+# ---- Payload della mod (le classi servite dal server licenze) ----
+payload/*
+!payload/.gitkeep
+
+# ---- Log ----
+logs/*
+!logs/.gitkeep
+*.log
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
