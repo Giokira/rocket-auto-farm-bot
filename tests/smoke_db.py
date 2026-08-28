@@ -154,7 +154,7 @@ async def main() -> None:
     print("rate limiter              OK (retry_after=%ds)" % retry)
 
     # ---- Validatori ----
-    from handlers.common import PAY_PAYPAL, is_valid_mc_username, payment_kind
+    from handlers.common import is_valid_mc_username
     assert is_valid_mc_username("Steve_99")
     assert is_valid_mc_username("  abc  ")
     assert not is_valid_mc_username("ab")             # troppo corto
@@ -163,11 +163,6 @@ async def main() -> None:
     assert not is_valid_mc_username("nome-utente")    # trattino
     assert not is_valid_mc_username("drop;table")
     print("username Minecraft        OK")
-
-    assert payment_kind(TXN_A) == PAY_PAYPAL
-    assert payment_kind("abc") is None
-    assert payment_kind("") is None
-    print("riferimento pagamento     OK")
 
     print("\nTUTTI I TEST PASSATI")
 

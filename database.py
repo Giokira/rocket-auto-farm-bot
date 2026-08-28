@@ -34,6 +34,8 @@ import config
 STATUS_WAITING_PAYMENT = "in_attesa_pagamento"      # creato, riferimento non ancora ricevuto
 STATUS_VERIFYING = "in_verifica"                    # riferimento ricevuto, attende l'admin
 STATUS_TO_DELIVER_INGAME = "da_consegnare_in_gioco"  # pagato, valuta da consegnare a mano
+STATUS_PAID = "pagato"                              # licenza/mod pagata, in attesa che il cliente la richieda
+STATUS_DELIVERY_REQUESTED = "richiesta_consegna"    # cliente ha chiesto mod/licenza, attende l'admin
 STATUS_COMPLETED = "completato"                     # consegnato
 STATUS_REJECTED = "rifiutato"                       # admin ha respinto
 STATUS_CANCELLED = "annullato"                      # annullato dall'utente
@@ -44,6 +46,8 @@ STATUS_LABELS = {
     STATUS_WAITING_PAYMENT: "In attesa di pagamento",
     STATUS_VERIFYING: "In verifica",
     STATUS_TO_DELIVER_INGAME: "Da consegnare in gioco",
+    STATUS_PAID: "Pagato, in attesa di richiesta mod/licenza",
+    STATUS_DELIVERY_REQUESTED: "Richiesta mod/licenza in attesa di conferma",
     STATUS_COMPLETED: "Completato",
     STATUS_REJECTED: "Rifiutato",
     STATUS_CANCELLED: "Annullato",
@@ -52,7 +56,10 @@ STATUS_LABELS = {
 }
 
 # Stati che impegnano l'admin o il compratore: contano come "ordine aperto".
-ACTIVE_STATUSES = (STATUS_WAITING_PAYMENT, STATUS_VERIFYING, STATUS_TO_DELIVER_INGAME)
+ACTIVE_STATUSES = (
+    STATUS_WAITING_PAYMENT, STATUS_VERIFYING, STATUS_TO_DELIVER_INGAME,
+    STATUS_PAID, STATUS_DELIVERY_REQUESTED,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS orders (

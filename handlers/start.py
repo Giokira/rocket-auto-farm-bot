@@ -17,25 +17,18 @@ WELCOME = (
     "<b>Come funziona</b>\n"
     "1. Apri il catalogo e scegli\n"
     "2. Premi <b>Compra</b> e indica il tuo <b>username Minecraft</b>\n"
-    "3. Paghi con PayPal mettendo il codice ordine nella causale\n"
-    "4. Mi mandi l'ID transazione (o lo screenshot)\n"
-    "5. Verifico a mano e ricevi tutto qui in chat\n\n"
+    "3. Compri un buono regalo Amazon dell'importo esatto e mi mandi il codice\n"
+    "4. Verifico a mano il pagamento\n"
+    "5. Quando vuoi ricevere mod e licenza, la richiedi con un bottone: te la mando dopo l'ok\n\n"
     "Comandi: /catalogo /ordine /help"
 )
 
 
 def _help_text() -> str:
-    if config.PAYPAL_MODE == config.MODE_FRIENDS:
-        pay = (
-            "Pagamento <b>PayPal - Amici e Famiglia</b> (non Beni e servizi).\n"
-            "Nella causale va <b>solo il codice ordine</b>, nient'altro.\n"
-            "Amici e Famiglia non prevede protezione acquisti: paghi solo se ti fidi."
-        )
-    else:
-        pay = (
-            "Pagamento <b>PayPal - Beni e servizi</b>.\n"
-            "Nella causale va <b>solo il codice ordine</b>, nient'altro."
-        )
+    pay = (
+        "Pagamento con <b>buono regalo Amazon</b> a codice.\n"
+        "Compri il buono dell'importo esatto e mi mandi <b>solo il codice</b>."
+    )
 
     return (
         "<b>Comandi disponibili</b>\n"
@@ -49,9 +42,10 @@ def _help_text() -> str:
         "controlla di scriverlo giusto.\n\n"
         f"<b>Pagamento</b>\n{pay}\n\n"
         "<b>Dopo il pagamento</b>\n"
-        "Incolla l'<b>ID transazione</b> PayPal, oppure manda uno screenshot "
-        "della ricevuta. L'ordine passa in verifica e ricevi tutto appena "
-        "confermo il pagamento.\n\n"
+        "Verifico il codice a mano. Per mod e licenza, l'ordine passa in stato "
+        "\"pagato\": quando vuoi riceverli premi il bottone <b>Richiedi mod e licenza</b> "
+        "e appena confermo te li mando qui in chat. Per la valuta in gioco la ricevi "
+        "in automatico appena confermo.\n\n"
         "Problemi con un ordine? Scrivimi il codice ordine."
     )
 

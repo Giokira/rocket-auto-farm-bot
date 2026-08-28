@@ -17,10 +17,6 @@ import database as db
 # Username Minecraft: 3-16 caratteri, lettere, cifre e underscore.
 MC_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
 
-# ID transazione PayPal: 17 caratteri alfanumerici nella pratica; si accetta un
-# intervallo un po' piu' largo per non rifiutare formati legittimi.
-PAYPAL_TXN_RE = re.compile(r"^[A-Z0-9]{12,24}$")
-
 # Codice gift card: ammette anche i trattini dei codici a blocchi.
 GIFTCARD_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{7,40}$")
 
@@ -30,18 +26,19 @@ CB_PRODUCT = "cat:show:"          # + product_id
 CB_BUY = "ord:buy:"               # + product_id
 CB_MY_ORDERS = "ord:mine"
 CB_CANCEL_ORDER = "ord:cancel:"   # + order_code
-CB_GIFTCARD = "ord:gift:"         # + order_code
+CB_REQUEST_DELIVERY = "ord:req:"  # + order_code (richiesta consegna mod/licenza)
 CB_HOME = "nav:home"
 CB_ADMIN_LIST = "adm:list"
 CB_ADMIN_APPROVE = "adm:ok:"      # + order_code
 CB_ADMIN_REJECT = "adm:no:"       # + order_code
 CB_ADMIN_DELIVERED = "adm:done:"  # + order_code (valuta consegnata in gioco)
+CB_ADMIN_DELIVER_APPROVE = "adm:dok:"  # + order_code (accetta richiesta mod/licenza)
+CB_ADMIN_DELIVER_REJECT = "adm:dno:"   # + order_code (rifiuta richiesta mod/licenza)
 CB_ADMIN_REFUND = "adm:refund:"   # + order_code
 CB_ADMIN_DISPUTE = "adm:disp:"    # + order_code
 CB_ADMIN_REVOKE = "adm:revoke:"   # + order_code
 CB_ADMIN_DETAIL = "adm:show:"     # + order_code
 
-PAY_PAYPAL = "paypal"
 PAY_GIFTCARD = "giftcard"
 
 
@@ -57,19 +54,6 @@ def money(amount: float, currency: str = "EUR") -> str:
 
 def is_valid_mc_username(text: str) -> bool:
     return bool(MC_USERNAME_RE.match(text.strip()))
-
-
-def payment_kind(text: str) -> str | None:
-    """Riconosce il tipo di riferimento di pagamento incollato dall'utente.
-
-    Ritorna PAY_PAYPAL, PAY_GIFTCARD oppure None se il formato non e' credibile.
-    """
-    value = db.normalize_payment_id(text)
-    if PAYPAL_TXN_RE.match(value):
-        return PAY_PAYPAL
-    if GIFTCARD_RE.match(value):
-        return PAY_GIFTCARD
-    return None
 
 
 def user_label(user) -> str:
@@ -92,6 +76,18 @@ def back_home_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Torna al menu", callback_data=CB_HOME)],
     ])
+
+
+def request_delivery_keyboard(order_code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Richiedi mod e licenza",
+                             callback_data=f"{CB_REQUEST_DELIVERY}{order_code}")],
+    ])
+
+
+def user_link(user_id: int, uname_label: str) -> str:
+    """Nome utente cliccabile: apre la chat diretta anche senza username pubblico."""
+    return f'<a href="tg://user?id={user_id}">{esc(uname_label)}</a>'
 
 
 def status_label(status: str) -> str:

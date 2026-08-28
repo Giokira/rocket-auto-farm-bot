@@ -27,27 +27,33 @@ from telegram.ext import (
 import catalog
 import config
 import database as db
-import paypal
 from handlers.common import (
     CB_ADMIN_APPROVE,
+    CB_ADMIN_DELIVER_APPROVE,
+    CB_ADMIN_DELIVER_REJECT,
     CB_ADMIN_REJECT,
     CB_BUY,
     CB_CANCEL_ORDER,
     CB_CATALOG,
-    CB_GIFTCARD,
     CB_MY_ORDERS,
+    CB_REQUEST_DELIVERY,
     GIFTCARD_RE,
     PAY_GIFTCARD,
-    PAY_PAYPAL,
     esc,
     format_order,
     is_valid_mc_username,
     main_menu_keyboard,
     money,
-    payment_kind,
+    request_delivery_keyboard,
     user_label,
+    user_link,
 )
-from orderflow import confirm_and_deliver
+from orderflow import (
+    approve_delivery_request,
+    confirm_and_deliver,
+    reject_delivery_request,
+    request_delivery,
+)
 from utils.logger import log_event
 from utils.ratelimit import RateLimiter
 
@@ -108,14 +114,28 @@ def _giftcard_text(order: dict) -> str:
 
     Nessun nome mostrato: il compratore manda un codice, l'admin lo riscatta.
     """
-    amount = esc(money(order["price"], order["currency"]))
-    extra = config.GIFTCARD_INSTRUCTIONS or (
-        "Compra un <b>buono regalo Amazon</b> (amazon.it) da esattamente "
-        f"<b>{amount}</b>."
-    )
+    product = catalog.get_product(order["product_id"])
+    negotiable = bool(product and product.price_negotiable)
+
+    if negotiable:
+        amount_line = (
+            "Importo: <b>da concordare in chat</b> prima di comprare il buono.\n"
+        )
+        extra = (
+            "Scrivimi qui in chat per concordare l'importo, poi compra un "
+            "<b>buono regalo Amazon</b> (amazon.it) da quella cifra esatta."
+        )
+    else:
+        amount = esc(money(order["price"], order["currency"]))
+        amount_line = f"Importo esatto: <b>{amount}</b>\n"
+        extra = config.GIFTCARD_INSTRUCTIONS or (
+            "Compra un <b>buono regalo Amazon</b> (amazon.it) da esattamente "
+            f"<b>{amount}</b>."
+        )
+
     return (
         f"<b>Ordine {esc(order['order_code'])}</b>\n"
-        f"Importo esatto: <b>{amount}</b>\n\n"
+        f"{amount_line}\n"
         "<b>Come pagare</b>\n"
         f"{extra}\n"
         "Poi <b>incolla qui il codice</b> del buono "
@@ -131,61 +151,16 @@ def _giftcard_text(order: dict) -> str:
 
 
 def _payment_text(order: dict) -> str:
-    """Istruzioni di pagamento, secondo il metodo configurato."""
-    if config.giftcard_mode():
-        return _giftcard_text(order)
-
-    dest = config.paypal_destination()
-    head = (
-        f"<b>Ordine {esc(order['order_code'])}</b>\n"
-        f"Importo esatto: <b>{esc(money(order['price'], order['currency']))}</b>\n"
-        f"Destinatario PayPal: <code>{esc(dest)}</code>\n\n"
-    )
-
-    if config.PAYPAL_MODE == config.MODE_FRIENDS:
-        body = (
-            "<b>Come pagare</b>\n"
-            f"Invia l'importo a <code>{esc(dest)}</code> scegliendo "
-            "<b>Amici e Famiglia</b> (NON Beni e servizi).\n"
-            f"Nella causale scrivi <b>solo</b> il codice: <code>{esc(order['order_code'])}</code>\n"
-            "Nient'altro: niente descrizioni, niente nomi.\n\n"
-            "<b>Attenzione</b>\n"
-            "- Un pagamento inviato come <b>Beni e servizi</b> viene rifiutato.\n"
-            "- Amici e Famiglia non prevede protezione acquisti: e' un pagamento "
-            "fra persone che si fidano.\n"
-            "- Senza il codice in causale non riesco ad abbinare il pagamento "
-            "al tuo ordine.\n\n"
-        )
-    else:
-        body = (
-            "<b>Come pagare</b>\n"
-            f"Invia l'importo a <code>{esc(dest)}</code> come "
-            "<b>Beni e servizi</b>.\n"
-            f"Nella causale scrivi <b>solo</b> il codice: <code>{esc(order['order_code'])}</code>\n\n"
-            "<b>Attenzione</b>\n"
-            "- Invia l'importo esatto: le eventuali commissioni sono a tuo carico.\n"
-            "- Senza il codice in causale non riesco ad abbinare il pagamento.\n\n"
-        )
-
-    tail = (
-        "<b>Dopo il pagamento</b>\n"
-        "Incolla qui l'<b>ID transazione</b> PayPal (nei dettagli del movimento), "
-        "oppure manda uno <b>screenshot</b> della ricevuta.\n"
-        "Verifico a mano e ricevi tutto qui in chat."
-    )
-    return head + body + tail
+    """Istruzioni di pagamento: solo buono regalo Amazon a codice."""
+    return _giftcard_text(order)
 
 
 def _pending_order_keyboard(order_code: str) -> InlineKeyboardMarkup:
-    rows = []
-    # In modalita' gift card le istruzioni SONO gia' quelle del buono: il bottone
-    # avrebbe senso solo come ripiego quando il metodo principale e' PayPal.
-    if config.GIFTCARD_ENABLED and not config.giftcard_mode():
-        rows.append([InlineKeyboardButton("Paga con gift card",
-                                          callback_data=f"{CB_GIFTCARD}{order_code}")])
-    rows.append([InlineKeyboardButton("Annulla ordine",
-                                      callback_data=f"{CB_CANCEL_ORDER}{order_code}")])
-    rows.append([InlineKeyboardButton("Torna al catalogo", callback_data=CB_CATALOG)])
+    rows = [
+        [InlineKeyboardButton("Annulla ordine",
+                              callback_data=f"{CB_CANCEL_ORDER}{order_code}")],
+        [InlineKeyboardButton("Torna al catalogo", callback_data=CB_CATALOG)],
+    ]
     return InlineKeyboardMarkup(rows)
 
 
@@ -347,32 +322,6 @@ async def cancel_order_callback(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 
-async def giftcard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Istruzioni per il metodo alternativo, se abilitato in configurazione."""
-    query = update.callback_query
-    order_code = query.data[len(CB_GIFTCARD):]
-    order = await db.get_order(order_code)
-
-    if order is None or order["user_id"] != update.effective_user.id:
-        await query.answer("Ordine non trovato.", show_alert=True)
-        return
-    if not config.GIFTCARD_ENABLED:
-        await query.answer("Metodo non disponibile.", show_alert=True)
-        return
-
-    await query.answer()
-    instructions = config.GIFTCARD_INSTRUCTIONS or (
-        "Contattami per concordare il tipo di gift card accettato."
-    )
-    await query.message.reply_html(
-        f"<b>Ordine {esc(order_code)}</b>\n"
-        f"Importo: <b>{esc(money(order['price'], order['currency']))}</b>\n\n"
-        f"{esc(instructions)}\n\n"
-        "Quando l'hai acquistata incolla qui il <b>codice</b> della gift card. "
-        "Ogni codice puo' essere usato per un solo ordine."
-    )
-
-
 # --------------------------------------------------------------------------
 # Riferimento di pagamento
 # --------------------------------------------------------------------------
@@ -388,10 +337,9 @@ async def _handle_payment_reference(update: Update, context: ContextTypes.DEFAUL
     # manderebbe l'ordine in verifica con un riferimento inutile.
     if await db.get_order_by_ref(raw):
         await update.message.reply_html(
-            "Quello e' un <b>codice ordine</b>: va scritto nella causale del "
-            "pagamento, non qui.\n"
-            "Qui serve l'<b>ID transazione</b> che PayPal assegna al movimento, "
-            "oppure uno screenshot della ricevuta."
+            "Quello e' un <b>codice ordine</b>, non un codice di gift card.\n"
+            "Qui serve il <b>codice del buono regalo Amazon</b>, oppure uno "
+            "screenshot della ricevuta."
         )
         return
 
@@ -439,29 +387,8 @@ async def _handle_payment_reference(update: Update, context: ContextTypes.DEFAUL
 
 async def _verify_and_notify(context: ContextTypes.DEFAULT_TYPE, order: dict,
                              kind: str) -> None:
-    """Verifica automatica (se possibile) e notifica all'admin."""
-    verification = None
-    if kind == PAY_PAYPAL and config.paypal_auto_verify_enabled():
-        verification = await paypal.verify_payment(
-            order["paypal_txn_id"], order["price"], order["currency"]
-        )
-        log_event("verifica_paypal", order=order["order_code"],
-                  esito="ok" if verification.ok else "ko",
-                  degradata=verification.degraded, motivo=verification.reason)
-
-        if verification.ok and config.PAYPAL_AUTOCONFIRM:
-            ok, message = await confirm_and_deliver(
-                context.bot, order, actor_id=0, note="Auto-confermato dall'API PayPal"
-            )
-            await _notify_admin_text(
-                context,
-                f"<b>Auto-conferma</b> ordine <code>{esc(order['order_code'])}</code>\n"
-                f"{esc(message)}",
-            )
-            if ok:
-                return  # gia' gestito: niente bottoni di conferma
-
-    await _notify_admin_new_payment(context, order, verification)
+    """Notifica all'admin il nuovo pagamento da verificare a mano."""
+    await _notify_admin_new_payment(context, order, None)
 
 
 async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -486,38 +413,15 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    # In modalita' gift card ogni testo libero e' il codice del buono: si accetta
-    # se ha la forma di un codice, senza passare dal riconoscimento PayPal.
-    if config.giftcard_mode():
-        if not GIFTCARD_RE.match(db.normalize_payment_id(text)):
-            await update.message.reply_html(
-                "Non riconosco un codice valido.\n"
-                "Incolla qui il <b>codice</b> del buono regalo Amazon "
-                "(tipo <code>XXXX-XXXXXXX-XXXX</code>), solo il codice."
-            )
-            return
-        await _handle_payment_reference(update, context, order, text, PAY_GIFTCARD)
-        return
-
-    kind = payment_kind(text)
-    if kind is None:
+    # Unico metodo: ogni testo libero e' il codice del buono regalo Amazon.
+    if not GIFTCARD_RE.match(db.normalize_payment_id(text)):
         await update.message.reply_html(
-            "Non riconosco un riferimento di pagamento valido.\n"
-            "L'<b>ID transazione PayPal</b> e' una stringa di lettere e numeri "
-            "(circa 17 caratteri), la trovi nei dettagli del movimento.\n"
-            "In alternativa manda uno <b>screenshot</b> della ricevuta."
+            "Non riconosco un codice valido.\n"
+            "Incolla qui il <b>codice</b> del buono regalo Amazon "
+            "(tipo <code>XXXX-XXXXXXX-XXXX</code>), solo il codice."
         )
         return
-
-    if kind == PAY_GIFTCARD and not config.GIFTCARD_ENABLED:
-        await update.message.reply_html(
-            "Quello non sembra un ID transazione PayPal.\n"
-            "Controlla di aver copiato l'ID del movimento, oppure manda uno "
-            "screenshot della ricevuta."
-        )
-        return
-
-    await _handle_payment_reference(update, context, order, text, kind)
+    await _handle_payment_reference(update, context, order, text, PAY_GIFTCARD)
 
 
 async def photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -525,7 +429,7 @@ async def photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     L'unicita' si basa sul file_unique_id della foto: impedisce di rimandare
     lo stesso identico file su un secondo ordine. La verifica vera resta
-    quella dell'admin sul conto PayPal.
+    quella dell'admin.
     """
     user = update.effective_user
     order = await db.get_open_order_for_user(user.id)
@@ -594,19 +498,10 @@ async def _notify_admin_new_payment(context: ContextTypes.DEFAULT_TYPE, order: d
         InlineKeyboardButton("Rifiuta", callback_data=f"{CB_ADMIN_REJECT}{order['order_code']}"),
     ]])
 
-    if config.giftcard_mode():
-        howto = (
-            "Riscatta il <b>codice</b> (buono Amazon) sul tuo account. "
-            "Se e' valido e dell'importo giusto, Conferma; altrimenti Rifiuta."
-        )
-    elif config.PAYPAL_MODE == config.MODE_FRIENDS:
-        howto = (
-            "Controlla su PayPal: importo, causale uguale al codice ordine, mittente."
-        )
-    else:
-        howto = "Controlla la transazione su PayPal, poi conferma o rifiuta."
-    if verification is not None:
-        howto = f"{verification.label}\n{howto}"
+    howto = (
+        "Riscatta il <b>codice</b> (buono Amazon) sul tuo account. "
+        "Se e' valido e dell'importo giusto, Conferma; altrimenti Rifiuta."
+    )
 
     text = (
         "<b>Nuovo pagamento da verificare</b>\n\n"
@@ -624,6 +519,93 @@ async def _notify_admin_new_payment(context: ContextTypes.DEFAULT_TYPE, order: d
         )
     except TelegramError:
         logger.error("Notifica nuovo pagamento all'admin fallita", exc_info=True)
+
+
+# --------------------------------------------------------------------------
+# Richiesta di consegna mod/licenza (dopo pagamento confermato)
+# --------------------------------------------------------------------------
+
+async def request_delivery_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Il cliente chiede di ricevere mod e licenza per un ordine gia' pagato."""
+    query = update.callback_query
+    order_code = query.data[len(CB_REQUEST_DELIVERY):]
+    order = await db.get_order(order_code)
+
+    if order is None or order["user_id"] != update.effective_user.id:
+        await query.answer("Ordine non trovato.", show_alert=True)
+        return
+
+    ok, reason = await request_delivery(order)
+    if not ok:
+        await query.answer(reason, show_alert=True)
+        return
+
+    await query.answer("Richiesta inviata.")
+    await query.message.reply_html(
+        f"Richiesta inviata per l'ordine <b>{esc(order_code)}</b>.\n"
+        "Appena l'admin conferma ricevi mod e licenza qui in chat."
+    )
+
+    user = update.effective_user
+    uname = f"@{order['username']}" if order["username"] else user_label(user)
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Accetta", callback_data=f"{CB_ADMIN_DELIVER_APPROVE}{order_code}"),
+        InlineKeyboardButton("Rifiuta", callback_data=f"{CB_ADMIN_DELIVER_REJECT}{order_code}"),
+    ]])
+    await _notify_admin_text(
+        context,
+        "<b>Richiesta mod e licenza</b>\n\n"
+        + format_order(order, for_admin=True)
+        + f"\n\nCliente: {user_link(order['user_id'], uname)}",
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=config.ADMIN_USER_ID,
+            text=f"Accetti la richiesta per <b>{esc(order_code)}</b>?",
+            parse_mode=ParseMode.HTML,
+            reply_markup=keyboard,
+        )
+    except TelegramError:
+        logger.error("Notifica richiesta consegna all'admin fallita", exc_info=True)
+
+
+async def admin_approve_delivery_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if update.effective_user.id != config.ADMIN_USER_ID:
+        await query.answer("Non autorizzato.", show_alert=True)
+        return
+    order_code = query.data[len(CB_ADMIN_DELIVER_APPROVE):]
+    order = await db.get_order(order_code)
+    if order is None:
+        await query.answer("Ordine inesistente.", show_alert=True)
+        return
+
+    await query.answer("Elaborazione in corso...")
+    ok, message = await approve_delivery_request(
+        context.bot, order, actor_id=update.effective_user.id
+    )
+    await query.message.reply_html(
+        (f"Ordine <b>{esc(order_code)}</b>: {esc(message)}") if ok
+        else (f"Ordine <b>{esc(order_code)}</b>\n{esc(message)}")
+    )
+
+
+async def admin_reject_delivery_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if update.effective_user.id != config.ADMIN_USER_ID:
+        await query.answer("Non autorizzato.", show_alert=True)
+        return
+    order_code = query.data[len(CB_ADMIN_DELIVER_REJECT):]
+    order = await db.get_order(order_code)
+    if order is None:
+        await query.answer("Ordine inesistente.", show_alert=True)
+        return
+
+    await query.answer("Richiesta rifiutata.")
+    ok, message = await reject_delivery_request(
+        context.bot, order, actor_id=update.effective_user.id
+    )
+    await query.message.reply_html(esc(message) if ok else f"Non riuscito: {esc(message)}")
 
 
 # --------------------------------------------------------------------------
@@ -675,7 +657,11 @@ def register(app) -> None:
     app.add_handler(CommandHandler("ordine", ordine_command))
     app.add_handler(CallbackQueryHandler(buy_callback, pattern=f"^{CB_BUY}"))
     app.add_handler(CallbackQueryHandler(cancel_order_callback, pattern=f"^{CB_CANCEL_ORDER}"))
-    app.add_handler(CallbackQueryHandler(giftcard_callback, pattern=f"^{CB_GIFTCARD}"))
+    app.add_handler(CallbackQueryHandler(request_delivery_callback, pattern=f"^{CB_REQUEST_DELIVERY}"))
+    app.add_handler(CallbackQueryHandler(admin_approve_delivery_callback,
+                                         pattern=f"^{CB_ADMIN_DELIVER_APPROVE}"))
+    app.add_handler(CallbackQueryHandler(admin_reject_delivery_callback,
+                                         pattern=f"^{CB_ADMIN_DELIVER_REJECT}"))
     app.add_handler(CallbackQueryHandler(my_orders_callback, pattern=f"^{CB_MY_ORDERS}$"))
     app.add_handler(MessageHandler(filters.PHOTO, photo_message))
     # Registrato per ultimo: cattura il testo libero, che in questo bot

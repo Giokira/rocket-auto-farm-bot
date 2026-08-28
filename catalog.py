@@ -42,6 +42,7 @@ class Product:
     screenshot: str | None = None
     version: str = "1.0.0"
     mc_version: str = "1.20.1"
+    price_negotiable: bool = False
 
     @property
     def file_path(self) -> Path | None:
@@ -53,6 +54,8 @@ class Product:
 
     @property
     def price_label(self) -> str:
+        if self.price_negotiable:
+            return "prezzo da concordare"
         # Formato italiano: 10,00 EUR
         return f"{self.price:.2f}".replace(".", ",") + f" {self.currency}"
 
@@ -84,6 +87,7 @@ PRODUCTS: dict[str, Product] = {
             "La chiave funziona SOLO con lo username che indichi durante l'ordine."
         ),
         price=10.00,
+        price_negotiable=True,
         file="rocket-auto-farm.jar",
         screenshot=None,
         version="0.1.0",

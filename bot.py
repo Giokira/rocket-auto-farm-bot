@@ -47,12 +47,9 @@ async def on_startup(app: Application) -> None:
     log_event("bot_avviato", bot=me.username, admin=config.ADMIN_USER_ID)
     logger.info("Bot @%s avviato. Database: %s", me.username, config.DB_PATH)
 
-    mode = ("Amici e Famiglia" if config.PAYPAL_MODE == config.MODE_FRIENDS
-            else "Beni e servizi")
-    verify = "attiva" if config.paypal_auto_verify_enabled() else "manuale"
     lines = [
         "Bot avviato e pronto. Usa /admin per il pannello.",
-        f"PayPal: {mode} | verifica: {verify} | destinatario: {config.paypal_destination()}",
+        "Pagamento: solo buono regalo Amazon a codice. Consegna mod/licenza solo su richiesta del cliente.",
     ]
     lines += [f"Avviso: {w}" for w in STARTUP_WARNINGS]
 

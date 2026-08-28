@@ -79,8 +79,8 @@ GIFTCARD_INSTRUCTIONS: str = os.getenv("GIFTCARD_INSTRUCTIONS", "").strip()
 
 
 def giftcard_mode() -> bool:
-    """True quando il buono a codice e' il metodo principale."""
-    return PAYMENT_METHOD == METHOD_GIFTCARD
+    """Unico metodo di pagamento supportato: buono regalo Amazon a codice."""
+    return True
 
 # ---- Modello di licenza ----
 # online : la "chiave" e' un token opaco casuale; la mod la valida contro il
