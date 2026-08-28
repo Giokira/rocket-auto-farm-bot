@@ -397,6 +397,9 @@ async def text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     Priorita': 1) username atteso, 2) riferimento di pagamento per un ordine
     aperto, 3) messaggio di aiuto. Senza un ordine aperto non si tocca il DB.
     """
+    if update.message is None:
+        return  # post di canale/gruppo senza message: niente da fare qui
+
     user = update.effective_user
     text = (update.message.text or "").strip()
 
@@ -431,6 +434,9 @@ async def photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     lo stesso identico file su un secondo ordine. La verifica vera resta
     quella dell'admin.
     """
+    if update.message is None:
+        return  # post di canale/gruppo senza message: niente da fare qui
+
     user = update.effective_user
     order = await db.get_open_order_for_user(user.id)
     if order is None:
