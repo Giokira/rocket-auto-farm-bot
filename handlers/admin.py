@@ -246,9 +246,15 @@ async def approve_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ok, message = await confirm_and_deliver(
         context.bot, order, actor_id=update.effective_user.id
     )
+
+    # Il messaggio di esito rimanda a un'azione ("premi Consegnato"): la tastiera
+    # va ricostruita sullo stato NUOVO, altrimenti il bottone non compare e
+    # l'unico modo per chiudere l'ordine sarebbe riaprire /admin.
+    updated = await db.get_order(order_code)
     await query.message.reply_html(
         (f"Ordine <b>{esc(order_code)}</b>: {message}") if ok
-        else (f"Ordine <b>{esc(order_code)}</b>\n{esc(message)}")
+        else (f"Ordine <b>{esc(order_code)}</b>\n{esc(message)}"),
+        reply_markup=_order_actions_keyboard(updated) if updated else None,
     )
 
 
